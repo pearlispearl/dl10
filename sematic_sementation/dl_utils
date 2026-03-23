@@ -1,0 +1,124 @@
+import torch
+import numpy as np
+from tqdm import tqdm
+
+
+def accuracy_score(preds, targets):
+    """
+    Computes pixel-wise accuracy for multi-class segmentation.
+
+    Args:
+        preds (torch.Tensor): Model predictions (logits) of shape (N, C, H, W)
+        targets (torch.Tensor): Ground truth labels of shape (N, H, W)
+
+    Returns:
+        float: Pixel-wise accuracy (percentage).
+    """
+    preds = torch.argmax(preds, dim=1)  # Convert logits to class indices (N, H, W)
+    correct = (preds == targets).sum().item()  # Count correct pixels
+    total = targets.numel()  # Total number of pixels
+
+    return correct / total * 100  # Convert to percentage
+
+
+def dice_score(preds, targets, num_classes, smooth=1e-6):
+    """
+    Computes the Dice Score for multi-class segmentation.
+
+    Args:
+        preds (torch.Tensor): Model predictions (logits) of shape (N, C, H, W)
+        targets (torch.Tensor): Ground truth labels of shape (N, H, W)
+        num_classes (int): Number of segmentation classes.
+        smooth (float): Small value to avoid division by zero.
+
+    Returns:
+        float: Average Dice Score across all classes.
+    """
+    preds = torch.argmax(preds, dim=1)  # Convert logits to class indices (N, H, W)
+    preds_one_hot = torch.nn.functional.one_hot(preds, num_classes).permute(0, 3, 1, 2)  # (N, H, W, C) -> (N, C, H, W)
+    targets_one_hot = torch.nn.functional.one_hot(targets, num_classes).permute(0, 3, 1, 2)  # (N, H, W) -> (N, C, H, W)
+
+    # Compute Dice Score per class
+    intersection = (preds_one_hot * targets_one_hot).sum(dim=(2, 3))
+    union = preds_one_hot.sum(dim=(2, 3)) + targets_one_hot.sum(dim=(2, 3))
+    
+    dice_per_class = (2. * intersection + smooth) / (union + smooth)
+
+    # Average over classes (excluding background if needed)
+    dice_mean = dice_per_class.mean().item()
+
+    return dice_mean
+
+
+def train_one_epoch(dataloader, model, loss_fn, optimizer, epoch, device, writer, log_step_interval=50):
+    """
+    Train the model for one epoch.
+
+    Args:
+        dataloader: PyTorch DataLoader
+        model: PyTorch model
+        loss_fn: Loss function
+        optimizer: Optimizer
+        epoch: Current epoch number
+        device: Device to train on (CPU/GPU)
+        writer: TensorBoard writer
+        log_step_interval: Logging interval
+    """
+    model.train()
+    running_loss = 0.
+
+    for i, (X, y) in enumerate(tqdm(dataloader)):
+        X, y = X.to(device), y.to(device)
+
+        optimizer.zero_grad()
+        
+        # TODO: Make prediction
+        preds = model(X)
+        
+        # TODO: Compute loss
+        loss = loss_fn(preds,y)
+
+        loss.backward()
+        optimizer.step()
+
+        running_loss += loss.item()
+        if (i+1) % log_step_interval == 0:
+            print(f"Epoch {epoch+1}, Step {i+1}/{len(dataloader)}, Loss: {loss.item():.4f}")
+            writer.add_scalar('Loss/train', loss.item(), epoch * len(dataloader) + i)
+
+
+def test(dataloader, model, loss_fn, device):
+    """
+    Evaluate the model on the validation/test set.
+
+    Args:
+        dataloader: PyTorch DataLoader
+        model: PyTorch model
+        loss_fn: Loss function
+        device: Device (CPU/GPU)
+
+    Returns:
+        Average loss, predictions, and ground truth targets.
+    """
+    model.eval()
+    total_loss = 0
+    all_preds = []
+    all_targets = []
+
+    with torch.no_grad():
+        for X, y in tqdm(dataloader):
+            X, y = X.to(device), y.to(device)
+            
+            # TODO: Make prediction
+            preds = model(X)
+            
+            # TODO: Compute loss
+            loss = loss_fn(preds, y)
+
+            total_loss += loss.item()
+
+            all_preds.append(preds)
+            all_targets.append(y)
+
+    avg_loss = total_loss / len(dataloader)
+    return avg_loss, torch.cat(all_preds), torch.cat(all_targets)
